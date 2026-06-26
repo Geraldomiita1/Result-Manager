@@ -1,17 +1,13 @@
-{
-  "name": "st-kizito-mis-nextjs",
-  "version": "2026.06.26.1515",
-  "private": true,
-  "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start"
-  },
-  "dependencies": {
-    "next": "^14.2.5",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "xlsx": "^0.18.5",
-    "jszip": "^3.10.1"
-  }
+"use client";
+import dynamic from "next/dynamic";
+import { useEffect, useState } from "react";
+import { installStorageShim } from "../lib/storage-shim";
+
+const MKIS = dynamic(() => import("../components/MKIS.jsx"), { ssr: false });
+
+export default function Page() {
+  const [ready, setReady] = useState(false);
+  useEffect(() => { installStorageShim(); setReady(true); }, []);
+  if (!ready) return null;
+  return <MKIS />;
 }
