@@ -179,7 +179,7 @@ async function verifyPassword(plain, stored) {
 // (i.e. when no accounts have been saved to shared storage yet).
 const DEFAULT_ACCOUNTS_PLAIN = {
   teacher: { username: "Teacher", password: "Teacher123", role: "teacher" },
-  "gerald001": { username: "Gerald001", password: "ASINDESS11", role: "admin" },
+  "gerald": { username: "Gerald", password: "GOODTOGO11", role: "admin" },
 };
 async function buildDefaultAccounts() {
   const out = {};
@@ -230,11 +230,28 @@ function remarkFor(score) {
   if (score >= 25) return "Weak";
   return "Fail";
 }
-function rankWithTies(totals) {
-  const sorted = [...totals].filter(v => v !== null && v > 0).sort((a,b) => b-a);
-  return totals.map(t => {
+// Rank with ties. When `aggs` is supplied, ties on total marks are broken by
+// lower aggregate (better aggregate = better position). Pupils only share a
+// position when BOTH their total marks AND their aggregate match exactly.
+function rankWithTies(totals, aggs) {
+  return totals.map((t, i) => {
     if (!t || t === 0) return "-";
-    return sorted.indexOf(t) + 1;
+    const a = aggs ? aggs[i] : null;
+    const aIsNum = typeof a === "number";
+    let better = 0;
+    for (let j = 0; j < totals.length; j++) {
+      if (j === i) continue;
+      const tj = totals[j];
+      if (!tj || tj === 0) continue;
+      if (tj > t) { better++; continue; }
+      if (tj === t && aggs) {
+        const aj = aggs[j];
+        const ajIsNum = typeof aj === "number";
+        // lower agg ranks higher; non-numeric (e.g. "X") is worst
+        if (ajIsNum && (!aIsNum || aj < a)) better++;
+      }
+    }
+    return better + 1;
   });
 }
 function ordinal(n) {
@@ -455,7 +472,7 @@ function computeMonthRows({ month, classStudents, monthlyMarks, tk, subjects, is
     const div = isLower ? null : (hasX ? "X" : divisionOf(totAgg, 4, divisions));
     return { s, perSub, totMk, totAgg, div, hasX };
   });
-  const positions = rankWithTies(rows.map(r => (r.totMk > 0 ? r.totMk : null)));
+  const positions = rankWithTies(rows.map(r => (r.totMk > 0 ? r.totMk : null)), rows.map(r => typeof r.totAgg === "number" ? r.totAgg : null));
   const indexed = rows.map((r, i) => ({ ...r, pos: positions[i] }));
   return [...indexed].sort((a, b) => { if (a.pos === "-") return 1; if (b.pos === "-") return -1; return a.pos - b.pos; });
 }
@@ -1467,6 +1484,7 @@ function MarkEntry({ students, termMarks, setTermMarks, updateTermMark, requestO
   const [bulkMarkPreview, setBulkMarkPreview] = useState(null);
   const [bulkMarkError, setBulkMarkError] = useState("");
   const [pendingToast, setPendingToast] = useState("");
+  const [sortByPos, setSortByPos] = useState(false);
   const bulkMarkFileRef = useRef();
   // Wraps requestOrApplyTermMark to surface a brief toast whenever an edit
   // was filed for admin approval rather than saved immediately, so teachers
@@ -1530,7 +1548,7 @@ function MarkEntry({ students, termMarks, setTermMarks, updateTermMark, requestO
     const div = hasX ? "X" : (typeof totAgg==="number" ? divisionOf(totAgg, isLower?5:4, divisions) : "X");
     return { s, perSub, totMk, totAgg, div, hasX };
   }), [classStudents, termMarks, tk, subjects, bands, divisions, isLower]);
-  const positions = useMemo(()=> rankWithTies(rows.map(r=>r.totMk>0?r.totMk:null)), [rows]);
+  const positions = useMemo(()=> rankWithTies(rows.map(r=>r.totMk>0?r.totMk:null), rows.map(r=>typeof r.totAgg==="number"?r.totAgg:null)), [rows]);
   const indexedRows = useMemo(()=> rows.map((r,i)=>({...r, pos:positions[i]})), [rows, positions]);
   const sortedRows = useMemo(()=>{
     return [...indexedRows].sort((a,b)=>{ if(a.pos==="-") return 1; if(b.pos==="-") return -1; return a.pos - b.pos; });
@@ -1659,6 +1677,9 @@ function MarkEntry({ students, termMarks, setTermMarks, updateTermMark, requestO
                   : <button onClick={handleRequestUnlock} style={btnWarning}>🔓 Request Unlock</button>)
             : <button onClick={handleSave} style={btnSuccess}>💾 Save &amp; Lock</button>
           }
+          <button onClick={()=>setSortByPos(v=>!v)} style={sortByPos?btnPrimary:btnGhost} title="Toggle ordering between alphabetical and highest-to-lowest by total marks">
+            {sortByPos ? "🔤 Show A–Z" : "📊 Sort Highest → Lowest"}
+          </button>
           <button onClick={()=>setShowBulkMark(v=>!v)} style={btnWarning}>📋 Bulk Mark Sheet</button>
           <button onClick={()=>window.print()} style={btnPrimary}>🖨️ Print</button>
         </div>
@@ -1780,7 +1801,7 @@ function MarkEntry({ students, termMarks, setTermMarks, updateTermMark, requestO
             )}
           </thead>
           <tbody>
-            {(isLocked ? sortedRows : indexedRows).map((r,i)=>(
+            {(sortByPos ? sortedRows : indexedRows).map((r,i)=>(
               <tr key={r.s.id} style={{background:i%2===0?"white":"#f8fafc"}}>
                 <td style={td}>{i+1}</td>
                 <td style={{...td,fontWeight:600,textAlign:"left"}}>{r.s.name}</td>
@@ -2104,7 +2125,7 @@ function MonthBlock({ month, cls, classStudents, monthlyMarks, updateMonthlyMark
     const div = isLower ? null : (hasX ? "X" : divisionOf(totAgg, 4, divisions));
     return { s, perSub, totMk, totAgg, div, hasX };
   }), [classStudents, monthlyMarks, tk, month, bands, divisions, subjects, isLower]);
-  const positions = useMemo(()=> rankWithTies(rows.map(r=>r.totMk>0?r.totMk:null)), [rows]);
+  const positions = useMemo(()=> rankWithTies(rows.map(r=>r.totMk>0?r.totMk:null), rows.map(r=>typeof r.totAgg==="number"?r.totAgg:null)), [rows]);
   const indexedRows = useMemo(()=> rows.map((r,i)=>({...r,pos:positions[i]})), [rows, positions]);
   const sortedRows = useMemo(()=>{
     return [...indexedRows].sort((a,b)=>{ if(a.pos==="-") return 1; if(b.pos==="-") return -1; return a.pos-b.pos; });
@@ -2126,6 +2147,7 @@ function MonthBlock({ month, cls, classStudents, monthlyMarks, updateMonthlyMark
   const handleSave = () => lockMonthlyEntry(cls, tk, month);
   const handleUnlock = () => unlockMonthlyEntry(cls, tk, month);
   const handleRequestUnlock = () => requestUnlockMonthly(cls, tk, month);
+  const [sortByPos, setSortByPos] = useState(false);
   return (
     <div style={{marginBottom:24}}>
       <div style={{background:"#1e3a6e",color:"white",padding:"10px 16px",borderRadius:"8px 8px 0 0",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
@@ -2144,6 +2166,9 @@ function MonthBlock({ month, cls, classStudents, monthlyMarks, updateMonthlyMark
                   : <button onClick={handleRequestUnlock} style={{...btnWarning,padding:"5px 12px",fontSize:11}}>🔓 Request Unlock</button>)
             : <button onClick={handleSave} style={{...btnSuccess,padding:"5px 12px",fontSize:11}}>💾 Save &amp; Lock</button>
           }
+          <button onClick={()=>setSortByPos(v=>!v)} style={{...(sortByPos?btnPrimary:btnGhost),padding:"5px 10px",fontSize:11}} title="Toggle ordering between alphabetical and highest-to-lowest">
+            {sortByPos ? "🔤 A–Z" : "📊 Sort H→L"}
+          </button>
           <span style={{fontSize:12,opacity:0.8}}>{cls} - {classStudents.length} STUDENTS</span>
         </div>
       </div>
@@ -2174,7 +2199,7 @@ function MonthBlock({ month, cls, classStudents, monthlyMarks, updateMonthlyMark
             )}
           </thead>
           <tbody>
-            {(isLocked ? sortedRows : indexedRows).map((r,i)=>(
+            {(sortByPos ? sortedRows : indexedRows).map((r,i)=>(
               <tr key={r.s.id} style={{background:i%2===0?"white":"#f8fafc"}}>
                 <td style={td}>{i+1}</td>
                 <td style={{...td,fontWeight:600,textAlign:"left"}}>{r.s.name}</td>
@@ -2255,14 +2280,24 @@ function MonthlyCards({ students, monthlyMarks, bands, divisions, school }) {
       const allRows = allClassStudents.map(s=>{
         const m = monthlyMarks[s.id]?.[tk]?.[month] || {};
         const totMk = subjects.reduce((a,sub)=>a+(m[sub]?.mk??0),0);
-        return { id:s.id, totMk };
+        let totAgg = null;
+        if (!isLower) {
+          const perSub = subjects.map(sub=>{
+            const mk = m[sub]?.mk;
+            const isX = (mk===undefined||mk===null);
+            return { mk, isX, agg: isX ? undefined : aggOf(mk, bands) };
+          });
+          const hasX = perSub.some(p=>p.isX);
+          totAgg = hasX ? null : perSub.reduce((a,p)=>a+(p.agg??0),0);
+        }
+        return { id:s.id, totMk, totAgg };
       });
-      const ranks = rankWithTies(allRows.map(r=>r.totMk>0?r.totMk:null));
+      const ranks = rankWithTies(allRows.map(r=>r.totMk>0?r.totMk:null), allRows.map(r=>typeof r.totAgg==="number"?r.totAgg:null));
       result[month] = {};
       allRows.forEach((r,i)=>{ result[month][r.id] = ranks[i]; });
     });
     return result;
-  }, [allClassStudents, monthlyMarks, tk, months, subjects]);
+  }, [allClassStudents, monthlyMarks, tk, months, subjects, isLower, bands]);
   const cardData = useMemo(()=> classStudents.map(s=>{
     const monthData = months.map(month=>{
       const m = monthlyMarks[s.id]?.[tk]?.[month] || {};
@@ -2425,7 +2460,7 @@ function ResultSheets({ students, termMarks, bands, divisions, school }) {
     const div=hasX?"X":(typeof totAgg==="number"?divisionOf(totAgg,isLower?5:4,divisions):"X");
     return {s,perSub,totMk,totAgg,div,hasX};
   }),[classStudents,termMarks,tk,subjects,bands,divisions,isLower]);
-  const positions = useMemo(()=>rankWithTies(rows.map(r=>r.totMk>0?r.totMk:null)),[rows]);
+  const positions = useMemo(()=>rankWithTies(rows.map(r=>r.totMk>0?r.totMk:null), rows.map(r=>typeof r.totAgg==="number"?r.totAgg:null)),[rows]);
   const sortedRows = useMemo(()=>{
     const indexed=rows.map((r,i)=>({...r,pos:positions[i]}));
     return [...indexed].sort((a,b)=>{ if(a.pos==="-") return 1; if(b.pos==="-") return -1; return a.pos-b.pos; });
@@ -2610,20 +2645,22 @@ function ReportCards({ students, termMarks, bands, divisions, school, initials }
     const pm={};
     const allRows=allClassStudents.map(s=>{
       const m=termMarks[s.id]?.[tk]||{};
-      const totMk=subjects.reduce((a,sub)=>{
+      let totMk=0; let totAgg=0; let hasX=false;
+      subjects.forEach(sub=>{
         const ca=m[sub]?.ca,exam=m[sub]?.exam;
         const isX=isLower?(exam===undefined||exam===null):(ca===undefined||ca===null)&&(exam===undefined||exam===null);
-        if(isX) return a;
+        if(isX){ hasX=true; return; }
         const hasBoth=typeof ca==="number"&&typeof exam==="number";
         const av=hasBoth?Math.round((ca+exam)/2):(typeof exam==="number"?exam:typeof ca==="number"?ca:undefined);
-        return a+(av??0);
-      },0);
-      return {id:s.id,totMk};
+        totMk += (av??0);
+        if (!isLower && av!==undefined) totAgg += aggOf(av, bands);
+      });
+      return {id:s.id, totMk, totAgg: (isLower||hasX) ? null : totAgg};
     });
-    const ranks=rankWithTies(allRows.map(r=>r.totMk>0?r.totMk:null));
+    const ranks=rankWithTies(allRows.map(r=>r.totMk>0?r.totMk:null), allRows.map(r=>typeof r.totAgg==="number"?r.totAgg:null));
     allRows.forEach((r,i)=>{ pm[r.id]=ranks[i]; });
     return pm;
-  },[allClassStudents,termMarks,tk,subjects,isLower]);
+  },[allClassStudents,termMarks,tk,subjects,isLower,bands]);
   return (
     <div>
       <div className="no-print" style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap",alignItems:"flex-end",justifyContent:"space-between"}}>
